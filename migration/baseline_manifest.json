@@ -13,20 +13,18 @@
   "pdf_fixture": {
     "filename": "demo_water_report.pdf",
     "block_count": 129,
-    "canonical_block_fields": [
+    "semantic_block_fields": [
       "block_id",
       "block_type",
       "text",
       "table_data",
-      "image",
       "page_start",
       "page_end",
-      "bbox",
       "heading_path",
       "quality_flags",
       "order"
     ],
-    "canonical_blocks_sha256": "2ed3b18fecd009a8df3d47ae93ee5a4e8d5eb0696ed506fa7d7c9b9c266e871e",
+    "semantic_blocks_sha256": "9554f8228130d296f39dbc47e4845712ef525b8bbd37a1b40add3756329d7772",
     "reviewed_parsed_document_sha256": "ed6576a3f145ab19be6dc05ef55fc6be90295e5eacc3c3a675534fc47e945df1"
   },
   "acceptance_expectations": {

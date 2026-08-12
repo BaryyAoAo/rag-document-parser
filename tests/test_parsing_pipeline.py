@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 from pathlib import Path
 
 import pytest
@@ -54,11 +55,33 @@ def test_pdf_matches_extraction_baseline(project_root: Path, output_root: Path) 
     )
     fixture = baseline["pdf_fixture"]
     assert len(result.parsed_document.blocks) == fixture["block_count"]
-    fields = fixture["canonical_block_fields"]
+    fields = fixture["semantic_block_fields"]
     canonical = [
-        {field: to_plain_data(getattr(block, field)) for field in fields}
+        {
+            **{field: to_plain_data(getattr(block, field)) for field in fields},
+            "image": _semantic_image(block.image),
+        }
         for block in result.parsed_document.blocks
     ]
     payload = json.dumps(canonical, ensure_ascii=False, sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    assert digest == fixture["canonical_blocks_sha256"]
+    assert digest == fixture["semantic_blocks_sha256"]
+
+    for block in result.parsed_document.blocks:
+        if block.bbox is None:
+            continue
+        assert len(block.bbox) == 4
+        assert all(math.isfinite(value) for value in block.bbox)
+        x0, top, x1, bottom = block.bbox
+        assert x0 <= x1
+        assert top <= bottom
+
+
+def _semantic_image(image: object) -> dict[str, object] | None:
+    if image is None:
+        return None
+    return {
+        "image_id": image.image_id,
+        "caption": image.caption,
+        "ocr_text": image.ocr_text,
+    }
