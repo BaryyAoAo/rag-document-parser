@@ -103,6 +103,9 @@ class BaiduPaddleOcrProvider:
         self.config = config
         self.session = session or requests.Session()
 
+    def clone(self) -> "BaiduPaddleOcrProvider":
+        return BaiduPaddleOcrProvider(self.config)
+
     @classmethod
     def from_env_file(cls, env_path: Path) -> "BaiduPaddleOcrProvider":
         load_env_file(env_path)

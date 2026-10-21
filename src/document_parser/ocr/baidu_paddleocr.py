@@ -19,7 +19,7 @@ PARAGRAPH_TYPES = {
     "text",
     "vertical_text",
 }
-EXCLUDED_TYPES = {"content", "footer", "footer_image", "header", "header_image", "number"}
+EXCLUDED_TYPES = {"content", "footer_image", "header_image", "number"}
 
 
 def convert_parse_result_to_blocks(

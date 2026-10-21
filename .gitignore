@@ -11,5 +11,6 @@ tmp/
 .tmp/
 dist/
 build/
+frontend/node_modules/
 docs/
 *.egg-info/

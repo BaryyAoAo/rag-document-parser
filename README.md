@@ -47,6 +47,8 @@ rag-document-parser/
 │   └── pptx/
 ├── migration/
 │   └── baseline_manifest.json     # 从原项目抽取时固化的迁移基线
+├── versions/                      # 各版本功能、修复、兼容性与验证记录
+├── frontend/                      # Vue 3 本地操作面板源码
 ├── src/
 │   └── document_parser/
 │       ├── parsers/               # 各文件类型 Parser Adapter
@@ -59,7 +61,8 @@ rag-document-parser/
 │       ├── repair.py              # 排序、章节和跨页结构修复
 │       ├── evaluation.py          # 解析技术质量评测
 │       ├── artifacts.py           # 解析当前最终有效产物
-│       └── cli.py                 # document-parser 命令行入口
+│       ├── cli.py                 # document-parser 命令行入口
+│       └── web/                   # 本地 API、任务管理和已构建页面
 ├── tests/                         # 单元、集成、回归和架构边界测试
 ├── .env.example                   # OCR 配置模板，不包含真实密钥
 ├── .gitignore
@@ -121,6 +124,41 @@ Windows 终端显示中文乱码时，可先设置：
 $env:PYTHONIOENCODING="utf-8"
 ```
 
+## 本地操作面板
+
+完整操作顺序与文件夹示例见 [本地操作面板使用指南](GUI_GUIDE.md)。
+
+安装 Web 可选依赖后启动服务，浏览器会自动打开本地页面：
+
+```powershell
+python -m pip install -e ".[web]"
+document-parser web --output "D:\water_parse_outputs" --port 8765
+```
+
+也可运行 `python -m document_parser web`。使用 `--no-open` 可仅启动服务，随后手动访问 `http://127.0.0.1:8765`。服务只绑定 `127.0.0.1`，面板供本机单人使用，无需账号。关闭启动它的终端或按 `Ctrl+C` 即可停止服务。现有 `parse`、`batch` 和审核 CLI 保持可用。
+
+在“解析工作台”中，可以选择多个文件或文件夹上传，也可以输入本机文件或目录的绝对路径。设置并行文件数后点击“开始解析”，页面会显示批次和逐文件进度、失败原因、Block 摘要与 PDF 源文件预览。可停止后续文件、重试失败文件；刷新页面后仍可查看保存在输出目录 `web_jobs/` 的任务记录。输出目录下还会生成原有运行产物和 `batches/` 批次报告。上传模式会先将文件复制到输出目录的 `uploads/`；单个文件上限为 200 MB。
+
+“OCR 审核”页支持常见决定：采用原生结果、批准并执行 OCR、采用 OCR 结果、应用决定。在线执行百度 OCR 需要先按现有说明配置 `.env`。复杂的 OCR 合并或排除决定仍可使用 CLI。执行中的文件会解析完毕后再停止，尚未开始的文件标记为已停止；面板一次运行一个批次，单个批次内部按设置并行解析文件。
+
+在“**OCR 审核与执行**”页，每条任务显示原文件名、页码、系统建议与原因。点击“查看源图和解析证据”可检查原页面及原生 Blocks；OCR 执行后还能对照 OCR Blocks。状态筛选区分别显示“待判断”“待执行 OCR”“正在 OCR”“待选结果”“待应用”和“已完成”。“正在 OCR”仅表示通过本地面板发起、此刻正在调用服务的任务；已经批准但未点击执行的任务在“待执行 OCR”中。
+
+需要 OCR 时按以下顺序操作：检查源图和原生结果 → 填写审核人，点击“批准 OCR” → 在“待执行 OCR”中点击“执行 OCR” → 到“待选结果”对照两版 Blocks，点击“采用 OCR 结果”或“保留原生结果” → 在“待应用”点击“应用决定”。“系统建议 OCR”只是候选判断，不代表已经调用 OCR，也不代表 OCR 结果自动成为有效版本。复杂合并与排除仍使用 CLI。
+
+文件详情中的“结果对照”展示基础解析与当前有效版本的 Block 差异，支持按 Block 类型和页码筛选及分页浏览，并汇总质量警告和待审核线索。“结构审核”可识别跨页段落与跨页表格候选，查看候选 Block 和 PDF 源文件，记录确认、段落文字修正、排除检索或拒绝文档决定，全部决定完成后定稿。决定和最终版本继续写入原有 `structure_review/` 审计目录；CLI `review-structure` 仍可操作同一审核记录。表格内容的单元格级编辑尚未提供，需在后续版本完善。
+
+“解析历史”按文件列出本地 Web 工作台的解析记录，可按名称或批次编号搜索、按状态筛选，点击文件会跳回工作台的结果对照。可下载单文件当前有效 `ParsedDocument` JSON 或 Markdown；勾选多个“可使用”文件后，填写本机已存在的目标文件夹绝对路径即可批量导出。文件详情和历史记录也提供打开文件运行目录、批次目录的按钮。DOCX、XLSX、PPTX 在结果对照中提供只读内容预览，方便核对段落、单元格或幻灯片内容，暂不保证与 Office 原始排版完全一致。
+
+如需修改页面源码，在 `frontend/` 中执行：
+
+```powershell
+cd frontend
+npm install
+npm run build
+```
+
+构建结果会写入 `src/document_parser/web/static/`，Python 包会包含这些静态文件。普通使用无需安装 Node.js。
+
 ## 解析单个文件
 
 ```powershell
@@ -157,23 +195,25 @@ D:\water_documents\
 
 ```powershell
 document-parser batch "D:\water_documents" `
-  --output "D:\water_parse_outputs"
+  --output "D:\water_parse_outputs" `
+  --workers 2
 ```
 
 默认支持 `.pdf`、`.docx`、`.xlsx`、`.html/.htm`、`.md/.markdown`、`.pptx`。如不希望进入子目录，增加 `--no-recursive`。
 
-每份源文件会创建一个独立运行目录，并生成总批次报告：
+`--workers` 控制同时解析的文件数，默认 2；设为 1 可串行运行。每份源文件会创建一个独立运行目录，并生成独立的批次报告：
 
 ```text
 D:\water_parse_outputs\
-├── batch_report.json
-├── 20260811_180001_水价政策_pdf\
-├── 20260811_180003_报装指南_docx\
-├── 20260811_180004_营业网点_xlsx\
+├── batches\batch_20261011_180001_a1b2c3d4e5f6\
+│   ├── batch_report.json
+│   └── results.jsonl
+├── 20261011_180001_水价政策_pdf_8e21d42a904f\
+├── 20261011_180001_报装指南_docx_54c96ac0b183\
 └── _ocr_review\
 ```
 
-`batch_report.json` 记录文件总数、成功数、待审核数、失败数，以及每份文档的 `document_id`、Block 数量和运行目录。批量处理单个文件失败时会记录错误并继续处理其他文件。
+`batch_report.json` 记录文件总数、成功数、待审核数、失败数，以及每份文档的 `document_id`、Block 数量和运行目录。`results.jsonl` 在每份文件完成时追加一行，便于长批次查看进度；最终报告按输入路径排序。单个文件失败时会记录错误、保留失败运行目录及其 Manifest，并继续处理其他文件。批次报告不会覆盖历史批次。
 
 ## 解析状态
 
@@ -221,6 +261,7 @@ report = parse_directory(
     pipeline,
     Path(r"D:\water_documents"),
     recursive=True,
+    workers=2,
 )
 
 print(report["file_count"])
@@ -443,6 +484,8 @@ document-parser review-structure $runDir decide <review_id> `
 不要永远固定读取 `06_parsed_document.json`。有效版本优先级是：
 
 ```text
+人工修订最终版（其依据的审核版本仍有效时）
+    ↓ 没有则
 结构审核最终版
     ↓ 没有则
 OCR 审核最终版
@@ -455,18 +498,19 @@ Python 中统一解析有效产物：
 ```python
 from pathlib import Path
 
-from document_parser.artifacts import resolve_parsing_artifacts
+from document_parser import load_resolved_parsed_document
 
-artifacts = resolve_parsing_artifacts(
+document = load_resolved_parsed_document(
     Path(r"D:\water_parse_outputs\20260811_180001_水价政策_pdf")
 )
 
-print(artifacts.source)
-print(artifacts.parsed_document_path)
-print(artifacts.evaluation_path)
+print(document.document_id)
+print(len(document.blocks))
 ```
 
-只有解析和人工审核全部完成后，下游 Chunk Pipeline 才应读取这里返回的 `parsed_document_path`。
+`load_resolved_parsed_document` 会按上述顺序选择产物，校验 JSON 数据契约、文档与 Block 标识，并拒绝仍有待人工处理项的运行目录。只有解析和人工审核全部完成后，下游 Chunk Pipeline 才应调用该接口。
+
+如果调用方已经持有明确的最终 JSON 路径，可以使用 `load_parsed_document(path)`；它仍会执行同样的结构和 Schema 版本校验，但不会替调用方判断审核流程是否完成。
 
 ## PaddleOCR-VL 配置
 
@@ -523,7 +567,7 @@ print(artifacts.evaluation_path)
 
 ## 开发与发布状态
 
-当前版本为 `0.1.0`，处于首个可复用版本的发布准备阶段。现有能力已通过本地自动化测试，但在生产使用前仍应使用目标业务的真实文档完成批量解析、抽样质检和性能评测。
+当前版本为 `0.6.0`。详细变更见 [`versions/`](versions/README.md)。现有能力已通过本地自动化测试，但在生产使用前仍应使用目标业务的真实文档完成批量解析、抽样质检和性能评测。
 
 提交代码前执行：
 

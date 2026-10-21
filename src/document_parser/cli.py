@@ -4,7 +4,9 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from threading import Timer
 from typing import Any
+import webbrowser
 
 from .batch import parse_directory
 from .io_utils import write_json
@@ -31,8 +33,15 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("input_dir")
     batch.add_argument("--output", default="outputs/batch")
     batch.add_argument("--no-recursive", action="store_true")
+    batch.add_argument("--workers", type=int, default=2, help="Concurrent files (default: 2)")
     _add_ocr_options(batch)
     batch.set_defaults(handler=_parse_batch)
+
+    web = commands.add_parser("web", help="Open the local browser workspace")
+    web.add_argument("--output", default="outputs/web")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--no-open", action="store_true", help="Do not open a browser automatically")
+    web.set_defaults(handler=_serve_web)
 
     structure = commands.add_parser("review-structure", help="Manage structure review tasks")
     structure.add_argument("run_dir")
@@ -89,7 +98,23 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     args = build_parser().parse_args()
     result = args.handler(args)
-    print(json.dumps(to_plain_data(result), ensure_ascii=False, indent=2))
+    if result is not None:
+        print(json.dumps(to_plain_data(result), ensure_ascii=False, indent=2))
+
+
+def _serve_web(args: argparse.Namespace) -> None:
+    try:
+        import uvicorn
+        from .web.app import create_app
+    except ImportError as error:
+        raise RuntimeError('Web dependencies are missing. Install with: pip install -e ".[web]"') from error
+    if not 1 <= args.port <= 65535:
+        raise ValueError("--port must be between 1 and 65535")
+    url = f"http://127.0.0.1:{args.port}"
+    if not args.no_open:
+        Timer(1.2, lambda: webbrowser.open(url)).start()
+    print(f"Opening Document Parser at {url}")
+    uvicorn.run(create_app(Path(args.output)), host="127.0.0.1", port=args.port)
 
 
 def _pipeline(args: argparse.Namespace) -> DocumentParsingPipeline:
@@ -111,7 +136,9 @@ def _parse_one(args: argparse.Namespace) -> Any:
 
 
 def _parse_batch(args: argparse.Namespace) -> Any:
-    return parse_directory(_pipeline(args), Path(args.input_dir), not args.no_recursive)
+    return parse_directory(
+        _pipeline(args), Path(args.input_dir), not args.no_recursive, workers=args.workers
+    )
 
 
 def _structure_store(args: argparse.Namespace) -> StructureReviewStore:

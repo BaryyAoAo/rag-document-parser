@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .io_utils import safe_stem, write_csv, write_json
 
@@ -10,9 +11,9 @@ from .io_utils import safe_stem, write_csv, write_json
 class RunContext:
     def __init__(self, output_root: Path, source_path: Path, file_type: str) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_id = f"{timestamp}_{safe_stem(source_path.stem)}_{file_type}"
+        self.run_id = f"{timestamp}_{safe_stem(source_path.stem)}_{file_type}_{uuid4().hex[:12]}"
         self.run_dir = output_root / self.run_id
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_dir.mkdir(parents=True, exist_ok=False)
         self.logs: list[str] = []
         self.manifest: dict[str, Any] = {
             "run_id": self.run_id,
@@ -52,3 +53,14 @@ class RunContext:
         self.manifest["finished_at"] = datetime.now().isoformat(timespec="seconds")
         self.manifest["summary"] = stats
         write_json(self.run_dir / "00_run_manifest.json", self.manifest)
+
+    def fail(self, error: Exception) -> None:
+        self.manifest["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        self.manifest["summary"] = {
+            "status": "failed",
+            "error_type": type(error).__name__,
+            "error": str(error),
+            "last_completed_stage": next(reversed(self.manifest["stages"]), None),
+        }
+        write_json(self.run_dir / "00_run_manifest.json", self.manifest)
+        self.log(f"failed parsing: {type(error).__name__}: {error}")

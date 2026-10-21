@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 import uuid
+from filelock import FileLock
 
 from ..cleaner import clean_blocks
 from ..evaluation import evaluate_parsed_document
@@ -64,24 +65,27 @@ class OcrReviewStore:
         self.decisions_path = self.root / "decisions.jsonl"
         self.ocr_results_path = self.root / "ocr_results.jsonl"
         self.queue_path = self.root / "review_queue.csv"
+        self._lock = FileLock(str(self.root / ".review.lock"))
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.applied_dir.mkdir(parents=True, exist_ok=True)
 
     def create_task(self, task: OcrReviewTask) -> dict[str, Any]:
         self._validate_task(task)
-        task_path = self._task_path(task.review_id)
-        if task_path.exists():
-            raise ValueError(f"Review task already exists: {task.review_id}")
-        data = asdict(task)
-        write_json(task_path, data)
-        self._refresh_queue_csv()
-        return self.get_task_state(task.review_id)
+        with self._lock:
+            task_path = self._task_path(task.review_id)
+            if task_path.exists():
+                raise ValueError(f"Review task already exists: {task.review_id}")
+            data = asdict(task)
+            write_json(task_path, data)
+            self._refresh_queue_csv()
+            return self.get_task_state(task.review_id)
 
     def list_task_states(self, status: str | None = None) -> list[dict[str, Any]]:
-        states = [self.get_task_state(path.stem) for path in sorted(self.tasks_dir.glob("*.json"))]
-        if status:
-            states = [state for state in states if state["status"] == status]
-        return states
+        with self._lock:
+            states = [self.get_task_state(path.stem) for path in sorted(self.tasks_dir.glob("*.json"))]
+            if status:
+                states = [state for state in states if state["status"] == status]
+            return states
 
     def task_states_for_run(self, run_dir: Path) -> list[dict[str, Any]]:
         target = run_dir.resolve()
@@ -174,9 +178,10 @@ class OcrReviewStore:
             "ocr_blocks_path": str(ocr_blocks_path.resolve()),
             "completed_at": _now_iso(),
         }
-        with self.ocr_results_path.open("a", encoding="utf-8", newline="") as file:
-            file.write(json.dumps(result, ensure_ascii=False) + "\n")
-        self._refresh_queue_csv()
+        with self._lock:
+            with self.ocr_results_path.open("a", encoding="utf-8", newline="") as file:
+                file.write(json.dumps(result, ensure_ascii=False) + "\n")
+            self._refresh_queue_csv()
         return result
 
     def record_decision(
@@ -212,9 +217,10 @@ class OcrReviewStore:
             "decided_at": _now_iso(),
         }
         self.root.mkdir(parents=True, exist_ok=True)
-        with self.decisions_path.open("a", encoding="utf-8", newline="") as file:
-            file.write(json.dumps(decision, ensure_ascii=False) + "\n")
-        self._refresh_queue_csv()
+        with self._lock:
+            with self.decisions_path.open("a", encoding="utf-8", newline="") as file:
+                file.write(json.dumps(decision, ensure_ascii=False) + "\n")
+            self._refresh_queue_csv()
         return decision
 
     def apply(self, review_id: str) -> dict[str, Any]:
@@ -564,6 +570,10 @@ class OcrReviewStore:
         return self.applied_dir / review_id / decision_id / "02_apply_manifest.json"
 
     def _refresh_queue_csv(self) -> None:
+        with self._lock:
+            self._write_queue_csv()
+
+    def _write_queue_csv(self) -> None:
         rows = []
         for state in self.list_task_states():
             latest = state.get("latest_decision") or {}
@@ -596,10 +606,15 @@ class OcrReviewStore:
             "source_preview_path",
         ]
         self.root.mkdir(parents=True, exist_ok=True)
-        with self.queue_path.open("w", encoding="utf-8-sig", newline="") as file:
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
+        temporary_path = self.root / f".review_queue_{uuid.uuid4().hex}.tmp"
+        try:
+            with temporary_path.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            temporary_path.replace(self.queue_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _read_json(path: Path) -> Any:

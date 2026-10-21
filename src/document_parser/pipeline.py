@@ -48,6 +48,13 @@ REVIEW_FIELDS = [
 ]
 
 
+class ParseExecutionError(RuntimeError):
+    def __init__(self, run_dir: Path, cause: Exception) -> None:
+        self.run_dir = run_dir
+        self.error_type = type(cause).__name__
+        super().__init__(f"{self.error_type}: {cause}")
+
+
 @dataclass(frozen=True)
 class RuntimeParseOptions:
     execute_auto_ocr: bool = False
@@ -67,6 +74,7 @@ class DocumentParsingPipeline:
         self.output_root = output_root.resolve()
         self.options = options or RuntimeParseOptions()
         self.parser_registry = parser_registry or PARSER_REGISTRY
+        self.ocr_provider = ocr_provider
         review_store = OcrReviewStore(self.output_root / "_ocr_review")
         self.pdf_ocr = PdfOcrReviewWorkflow(
             review_store=review_store,
@@ -90,6 +98,20 @@ class DocumentParsingPipeline:
         file_path = file_path.resolve()
         file_type = detect_file_type(file_path)
         context = RunContext(self.output_root, file_path, file_type)
+        try:
+            return self._parse_in_context(context, file_path, file_type, metadata, source_url)
+        except Exception as error:
+            context.fail(error)
+            raise ParseExecutionError(context.run_dir, error) from error
+
+    def _parse_in_context(
+        self,
+        context: RunContext,
+        file_path: Path,
+        file_type: str,
+        metadata: dict[str, Any] | None,
+        source_url: str,
+    ) -> ParseRunResult:
         context.log("start document parsing pipeline")
         source = SourceFile(
             source_id=f"src_{file_path.stem}",
@@ -187,6 +209,20 @@ class DocumentParsingPipeline:
             parsed_document=document,
             evaluation=evaluation,
             artifact_paths=artifacts,
+        )
+
+    def new_worker(self) -> "DocumentParsingPipeline":
+        provider = self.ocr_provider if self.options.execute_auto_ocr else None
+        if provider is not None:
+            clone = getattr(provider, "clone", None)
+            if not callable(clone):
+                raise ValueError("Parallel OCR requires an OCR provider with clone()")
+            provider = clone()
+        return DocumentParsingPipeline(
+            self.output_root,
+            options=self.options,
+            ocr_provider=provider,
+            parser_registry=self.parser_registry,
         )
 
     def _parser(self, file_type: str) -> BaseParser:
