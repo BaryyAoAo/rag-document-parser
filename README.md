@@ -126,6 +126,8 @@ $env:PYTHONIOENCODING="utf-8"
 
 ## 本地操作面板
 
+![Document Parser 本地操作面板：解析工作台](assets/operation-panel.png)
+
 完整操作顺序与文件夹示例见 [本地操作面板使用指南](GUI_GUIDE.md)。
 
 安装 Web 可选依赖后启动服务，浏览器会自动打开本地页面：
